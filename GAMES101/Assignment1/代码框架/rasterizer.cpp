@@ -157,14 +157,14 @@ void rst::rasterizer::draw(rst::pos_buf_id pos_buffer, rst::ind_buf_id ind_buffe
 
         for (auto& vec : v) {
             vec /= vec.w();
-        }
+        }//透视除法，从裁剪空间->NDC空间
 
         for (auto & vert : v)
         {
             vert.x() = 0.5*width*(vert.x()+1.0);
             vert.y() = 0.5*height*(vert.y()+1.0);
             vert.z() = vert.z() * f1 + f2;
-        }
+        }//从NDC空间->屏幕空间
 
         for (int i = 0; i < 3; ++i)
         {
