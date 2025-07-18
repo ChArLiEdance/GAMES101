@@ -96,6 +96,30 @@ inline bool Bounds3::IntersectP(const Ray& ray, const Vector3f& invDir,
     // invDir: ray direction(x,y,z), invDir=(1.0/x,1.0/y,1.0/z), use this because Multiply is faster that Division
     // dirIsNeg: ray direction(x,y,z), dirIsNeg=[int(x>0),int(y>0),int(z>0)], use this to simplify your logic
     // TODO test if ray bound intersects
+    float tmin = ((this->operator[](dirIsNeg[0]).x) - ray.origin.x) * invDir.x;
+    float tmax = ((this->operator[](1 - dirIsNeg[0]).x) - ray.origin.x) * invDir.x;
+    float tymin = ((this->operator[](dirIsNeg[1]).y) - ray.origin.y) * invDir.y;
+    float tymax = ((this->operator[](1 - dirIsNeg[1]).y) - ray.origin.y) * invDir.y;
+
+    if ((tmin > tymax) || (tymin > tmax))
+        return false;
+    if (tymin > tmin)
+        tmin = tymin;
+    if (tymax < tmax)
+        tmax = tymax;
+
+    float tzmin = ((this->operator[](dirIsNeg[2]).z) - ray.origin.z) * invDir.z;
+    float tzmax = ((this->operator[](1 - dirIsNeg[2]).z) - ray.origin.z) * invDir.z;
+
+    if ((tmin > tzmax) || (tzmin > tmax))
+        return false;
+    if (tzmin > tmin)
+        tmin = tzmin;
+    if (tzmax < tmax)
+        tmax = tzmax;
+
+    // 可选：如果只考虑正向射线，可以加上 tmax >= 0
+    return tmax >= 0;
 
 }
 

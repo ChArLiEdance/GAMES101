@@ -25,6 +25,20 @@ int main(int argc, char** argv)
     Material* light = new Material(DIFFUSE, (8.0f * Vector3f(0.747f+0.058f, 0.747f+0.258f, 0.747f) + 15.6f * Vector3f(0.740f+0.287f,0.740f+0.160f,0.740f) + 18.4f *Vector3f(0.737f+0.642f,0.737f+0.159f,0.737f)));
     light->Kd = Vector3f(0.65f);
 
+    //microfacet materials
+    Material* Microfacet1 = new Material(REFLC, Vector3f(0.0f));
+    Microfacet1->ior = 8;
+    Microfacet1->roughness = 0.06;
+    Microfacet1 ->Kd = Vector3f(0.14f, 0.60f, 0.091f);
+    
+    Material* Microfacet2 = new Material(REFLC, Vector3f(0.0f));
+    Microfacet2->ior = 8;
+    Microfacet2->roughness = 0.2;
+    Microfacet2 ->Kd = Vector3f(0.67f, 0.065f, 0.05f);
+    
+    Sphere b1(Vector3f(160, 120, 150), 120, Microfacet1);
+    Sphere b2(Vector3f(400 , 120, 350), 120, Microfacet2);
+
     MeshTriangle floor("../models/cornellbox/floor.obj", white);
     MeshTriangle shortbox("../models/cornellbox/shortbox.obj", white);
     MeshTriangle tallbox("../models/cornellbox/tallbox.obj", white);
@@ -32,9 +46,18 @@ int main(int argc, char** argv)
     MeshTriangle right("../models/cornellbox/right.obj", green);
     MeshTriangle light_("../models/cornellbox/light.obj", light);
 
+    // scene.Add(&floor);
+    // scene.Add(&shortbox);
+    // scene.Add(&tallbox);
+    // scene.Add(&left);
+    // scene.Add(&right);
+    // scene.Add(&light_);
+
     scene.Add(&floor);
-    scene.Add(&shortbox);
-    scene.Add(&tallbox);
+    //scene.Add(&shortbox);
+    scene.Add(&b1);
+    scene.Add(&b2);
+    //scene.Add(&tallbox);
     scene.Add(&left);
     scene.Add(&right);
     scene.Add(&light_);

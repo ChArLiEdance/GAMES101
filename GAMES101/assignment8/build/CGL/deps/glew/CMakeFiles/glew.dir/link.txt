@@ -1,0 +1,2 @@
+/opt/miniconda3/envs/games101/bin/arm64-apple-darwin20.0.0-ar qc libglew.a CMakeFiles/glew.dir/src/glew.c.o CMakeFiles/glew.dir/src/glewinfo.c.o CMakeFiles/glew.dir/src/visualinfo.c.o
+/opt/miniconda3/envs/games101/bin/arm64-apple-darwin20.0.0-ranlib libglew.a

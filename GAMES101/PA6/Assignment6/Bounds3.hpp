@@ -97,6 +97,52 @@ inline bool Bounds3::IntersectP(const Ray& ray, const Vector3f& invDir,
     // dirIsNeg: ray direction(x,y,z), dirIsNeg=[int(x>0),int(y>0),int(z>0)], use this to simplify your logic
     // TODO test if ray bound intersects
     
+
+    
+    // // slab method
+
+    //方法一
+    // float tmin = ((this->operator[](dirIsNeg[0]).x) - ray.origin.x) * invDir.x;
+    // float tmax = ((this->operator[](1 - dirIsNeg[0]).x) - ray.origin.x) * invDir.x;
+    // float tymin = ((this->operator[](dirIsNeg[1]).y) - ray.origin.y) * invDir.y;
+    // float tymax = ((this->operator[](1 - dirIsNeg[1]).y) - ray.origin.y) * invDir.y;
+
+    // if ((tmin > tymax) || (tymin > tmax))
+    //     return false;
+    // if (tymin > tmin)
+    //     tmin = tymin;
+    // if (tymax < tmax)
+    //     tmax = tymax;
+
+    // float tzmin = ((this->operator[](dirIsNeg[2]).z) - ray.origin.z) * invDir.z;
+    // float tzmax = ((this->operator[](1 - dirIsNeg[2]).z) - ray.origin.z) * invDir.z;
+
+    // if ((tmin > tzmax) || (tzmin > tmax))
+    //     return false;
+    // if (tzmin > tmin)
+    //     tmin = tzmin;
+    // if (tzmax < tmax)
+    //     tmax = tzmax;
+
+    // // 可选：如果只考虑正向射线，可以加上 tmax >= 0
+    // return tmax >= 0;
+    
+    
+    //方法二
+    const auto& origin = ray.origin;
+    float tEnter = -std::numeric_limits<float>::infinity();
+    float tExit = std::numeric_limits<float>::infinity();
+    for(int i=0;i<3;i++)
+    {
+        float min = (pMin[i]-origin[i]) * invDir[i];
+        float max = (pMax[i]-origin[i]) * invDir[i];
+        if(dirIsNeg[i]) {
+            std::swap(min, max);
+        }
+        tEnter = std::max(tEnter, min);
+        tExit = std::min(tExit, max);
+    }
+    return (tEnter < tExit)&& (tExit >= 0);
 }
 
 inline Bounds3 Union(const Bounds3& b1, const Bounds3& b2)

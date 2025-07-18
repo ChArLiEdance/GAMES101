@@ -7,7 +7,7 @@
 
 #include "Vector.hpp"
 
-enum MaterialType { DIFFUSE};
+enum MaterialType { DIFFUSE,MIRCO, REFLC};
 
 class Material{
 private:
@@ -93,7 +93,7 @@ public:
     Vector3f Kd, Ks;
     float specularExponent;
     //Texture tex;
-
+    float roughness;
     inline Material(MaterialType t=DIFFUSE, Vector3f e=Vector3f(0,0,0));
     inline MaterialType getType();
     //inline Vector3f getColor();
@@ -108,7 +108,34 @@ public:
     // given a ray, calculate the contribution of this ray
     inline Vector3f eval(const Vector3f &wi, const Vector3f &wo, const Vector3f &N);
 
+    inline float G_s(float NdotV, float a);
+    inline float G(Vector3f i, Vector3f o, Vector3f N , float a);
+    inline float D_GGX(Vector3f h, float r, Vector3f N);
+
+
 };
+
+float Material::G_s(float NdotV, float a)
+{
+    float k = (a + 1) * (a + 1) / 8;
+    return NdotV / (NdotV* (1- k) + k );
+}
+ 
+float Material::G(Vector3f i, Vector3f o, Vector3f N , float a)
+{
+    float NdotI = clamp(0.0, 1.0, dotProduct(N, i));
+    float NdotO = clamp(0.0, 1.0, dotProduct(N, o));
+    return G_s(NdotI, a) * G_s(NdotO , a);
+}
+
+float Material::D_GGX(Vector3f h, float r, Vector3f N)  
+{
+    float r2 = r * r;
+    float NdotH = clamp(0.0, 1.0, dotProduct(N, h));  //有点乘就需要约束！！
+    float NdotH2 = NdotH * NdotH;
+    float res = r2 / (M_PI * (NdotH2 * (r2 - 1) + 1) * (NdotH2 * (r2 - 1) + 1));
+    return res;
+}
 
 Material::Material(MaterialType t, Vector3f e){
     m_type = t;
@@ -131,6 +158,7 @@ Vector3f Material::getColorAt(double u, double v) {
 
 Vector3f Material::sample(const Vector3f &wi, const Vector3f &N){
     switch(m_type){
+        case MIRCO:
         case DIFFUSE:
         {
             // uniform sample on the hemisphere
@@ -142,11 +170,18 @@ Vector3f Material::sample(const Vector3f &wi, const Vector3f &N){
             
             break;
         }
+        case REFLC:
+        {
+            Vector3f localRay = reflect(wi, N).normalized();
+            return localRay;
+            break;
+        }
     }
 }
 
 float Material::pdf(const Vector3f &wi, const Vector3f &wo, const Vector3f &N){
     switch(m_type){
+        case MIRCO:
         case DIFFUSE:
         {
             // uniform sample probability 1 / (2 * PI)
@@ -154,6 +189,15 @@ float Material::pdf(const Vector3f &wi, const Vector3f &wo, const Vector3f &N){
                 return 0.5f / M_PI;
             else
                 return 0.0f;
+            break;
+        }
+        case REFLC:
+        {
+            if(dotProduct(wo,N)>0.0001f)
+            {
+                return 1.0f; // 反射光线的概率密度函数
+            }
+            else return 0.0f; // 反射光线的概率密度函数为0
             break;
         }
     }
@@ -171,6 +215,36 @@ Vector3f Material::eval(const Vector3f &wi, const Vector3f &wo, const Vector3f &
             }
             else
                 return Vector3f(0.0f);
+            break;
+        }
+        case MIRCO:
+        {
+            float cosalpha = dotProduct(N, wo); //wo是观测方向
+            if (cosalpha > 0.0f) {
+                Vector3f h = (wi + wo).normalized();
+                float F = 0.f;
+                fresnel(wi, N, ior, F);
+                float NdotI = clamp(0.0, 1.0, dotProduct(N, wi));
+                float NdotO = clamp(0.0, 1.0, dotProduct(N, wo));
+                float down = 4 * NdotI * NdotO + 1e-5;
+                float up = F * G(wi, wo, N, roughness) * D_GGX(h, roughness, N);
+                return (up / down) * Kd; //加上Kd就实现了颜色，当然主函数记得给材质设置Kd
+            }
+            else
+                return Vector3f(0.0f);
+            break;
+        }
+        case REFLC:
+        {
+            float cosa = dotProduct(N, wo);
+            if (cosa > 0.0001f)
+            {
+                float K = 0.0;
+                fresnel(wi, N ,ior , K);
+                Vector3f t = (1.0 / cosa) ;
+                t = t * Kd;
+                return t * K;
+            }
             break;
         }
     }

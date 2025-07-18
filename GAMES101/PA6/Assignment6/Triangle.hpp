@@ -231,11 +231,18 @@ inline Intersection Triangle::getIntersection(Ray ray)
         return inter;
     t_tmp = dotProduct(e2, qvec) * det_inv;
 
+    if (t_tmp < 0)
+        return inter; // Only consider forward rays
+
     // TODO find ray triangle intersection
 
-
-
-
+    inter.happened = true;
+    inter.coords = ray(t_tmp);
+    inter.normal = normal;
+    inter.distance = t_tmp;
+    inter.obj = this;
+    inter.m = m;
+    
     return inter;
 }
 
