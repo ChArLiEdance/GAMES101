@@ -251,18 +251,7 @@ void vioblk_attach(volatile struct virtio_mmio_regs* regs, int irqno) {
         regs->status|=VIRTIO_STAT_FAILED;
         return;
     }
-    uint32_t qlimit = (qmax < 128) ? qmax : 128;
-    size_t ticket_limit = HEAP_ALLOC_MAX / sizeof(struct vioblk_req_ticket);
-    if (ticket_limit == 0) {
-        ticket_limit = 1;
-    }
-    if (qlimit > ticket_limit) {
-        qlimit = ticket_limit;
-    }
-    if (qlimit == 0) {
-        qlimit = 1;
-    }
-    uint16_t qlen=(uint16_t)qlimit; //选择合适的qlen，受堆限制
+    uint16_t qlen=(uint16_t)((qmax<64) ? qmax:64); //选择合适的qlen
     regs->queue_num=qlen;
     __sync_synchronize();
     
@@ -291,7 +280,7 @@ void vioblk_attach(volatile struct virtio_mmio_regs* regs, int irqno) {
     memset(avail, 0, avail_sz);
     memset(used, 0, used_sz);
     __sync_synchronize();
-    //regs->queue_ready=1; //队列就绪
+    regs->queue_ready=1; //队列就绪
     __sync_synchronize();
 
     //vbd驱动初始化

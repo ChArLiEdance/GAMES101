@@ -23,7 +23,13 @@ git status -sbgit
 
 git add              //the file you edited
 
-./util/mkfs_ktfs ktfs.raw 8M 16 usr/bin/hello usr/games/trek
+../util/mkfs_ktfs ../sys/ktfs.raw 8M 16 ../usr/bin/hello ../usr/games/trek
+
+
+./cache_ktfs_test
+
+gcc -std=c11 -D_FORTIFY_SOURCE=0 -iquote .. -I. -iquote ../../../../mp1 cache_ktfs_standalone.c ../cache.c ../ktfs.c ../uio.c ../error.c -o cache_ktfs_test
+
 
 ### **/class/ece391/app/ece391-riscv-dev**
 

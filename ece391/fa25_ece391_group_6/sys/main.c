@@ -39,6 +39,7 @@
 static void attach_devices(void);
 static void mount_cdrive(void);  // mount primary storage device ("C drive")
 static void run_init(void);
+static void wait_for_terminal_attach(struct uio* term);
 
 void main(void) {
     extern char _kimg_end[];  // provided by kernel.ld
@@ -109,8 +110,22 @@ void mount_cdrive(void) {
     }
 }
 
+static void wait_for_terminal_attach(struct uio* term) {
+    static const char prompt[] = "\r\n*** Connect to serial1 (trek) ***\r\n";
+
+    if (term == NULL) return;
+
+    while (uio_write(term, prompt, sizeof(prompt) - 1) < 0) {
+        sleep_ms(100);
+    }
+    // Small pause so the banner is visible before the game starts spewing output.
+    sleep_ms(50);
+}
+
 void run_init(void) {
     struct uio* initexe;
+    struct uio* console_uio;
+    void (*entry)(void);
     int result;
 
     result = open_file(CMNTNAME, INITEXE, &initexe);
@@ -120,7 +135,23 @@ void run_init(void) {
         halt_failure();
     }
 
-    // FIXME
-    //  Run your executable here
-    //  Note that trek takes in a uio object to output to the console
+    result = open_file(DEVMNTNAME, "uart", &console_uio);
+    if (result != 0) {
+        kprintf("open_file(" DEVMNTNAME ",uart): %s; terminating\n", error_name(result));
+        halt_failure();
+    }
+
+    wait_for_terminal_attach(console_uio);
+
+    result = elf_load(initexe, &entry);
+    if (result != 0) {
+        kprintf(INITEXE ": elf_load failed: %s; terminating\n", error_name(result));
+        halt_failure();
+    }
+
+    uio_close(initexe);
+
+    ((void (*)(struct uio*))entry)(console_uio);
+
+    uio_close(console_uio);
 }

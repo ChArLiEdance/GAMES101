@@ -1,148 +1,18 @@
-#include <stdarg.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include "testsuite_1.h"
+
+#include <stddef.h>
 
 #include "cache.h"
+#include "console.h"
 #include "devimpl.h"
 #include "error.h"
-#include "fsimpl.h"
+#include "filesys.h"
 #include "ktfs.h"
-#include "thread.h"
+#include "string.h"
 #include "uio.h"
-#include "uioimpl.h"
-
-int mount_ktfs(const char* name, struct cache* cache);
-
-// ---------------------------------------------------------------------------
-// Minimal kernel runtime stubs
-// ---------------------------------------------------------------------------
-
-void* kmalloc(size_t size) { return malloc(size); }
-
-void* kcalloc(size_t nelts, size_t eltsz) { return calloc(nelts, eltsz); }
-
-void kfree(void* ptr) { free(ptr); }
-
-void panic_actual(const char* filename, int lineno, const char* msg) {
-    fprintf(stderr, "panic at %s:%d: %s\n", filename, lineno, msg);
-    abort();
-}
-
-void assert_failed(const char* filename, int lineno, const char* stmt) {
-    fprintf(stderr, "assertion failed at %s:%d: %s\n", filename, lineno, stmt);
-    abort();
-}
-
-static void log_message(const char* tag, const char* filename, int lineno, const char* fmt,
-                        va_list ap) {
-    fprintf(stderr, "[%s] %s:%d: ", tag, filename, lineno);
-    vfprintf(stderr, fmt, ap);
-    fputc('\n', stderr);
-}
-
-void debug_actual(const char* filename, int lineno, const char* fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    log_message("DEBUG", filename, lineno, fmt, ap);
-    va_end(ap);
-}
-
-void trace_actual(const char* filename, int lineno, const char* fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    log_message("TRACE", filename, lineno, fmt, ap);
-    va_end(ap);
-}
-
-void lock_init(struct lock* lock) {
-    (void)lock;
-}
-
-void lock_acquire(struct lock* lock) {
-    (void)lock;
-}
-
-void lock_release(struct lock* lock) {
-    (void)lock;
-}
-
-int storage_open(struct storage* sto) {
-    return (sto->intf->open != NULL) ? sto->intf->open(sto) : 0;
-}
-
-void storage_close(struct storage* sto) {
-    if (sto->intf->close != NULL) sto->intf->close(sto);
-}
-
-long storage_fetch(struct storage* sto, unsigned long long pos, void* buf, unsigned long bytecnt) {
-    if (sto->intf->fetch == NULL) return -ENOTSUP;
-    return sto->intf->fetch(sto, pos, buf, bytecnt);
-}
-
-long storage_store(struct storage* sto, unsigned long long pos, const void* buf,
-                   unsigned long bytecnt) {
-    if (sto->intf->store == NULL) return -ENOTSUP;
-    return sto->intf->store(sto, pos, buf, bytecnt);
-}
-
-int storage_cntl(struct storage* sto, int op, void* arg) {
-    if (sto->intf->cntl == NULL) return -ENOTSUP;
-    return sto->intf->cntl(sto, op, arg);
-}
-
-unsigned int storage_blksz(const struct storage* sto) { return sto->intf->blksz; }
-
-unsigned long long storage_capacity(const struct storage* sto) { return sto->capacity; }
-
-// ---------------------------------------------------------------------------
-// Minimal filesystem registry
-// ---------------------------------------------------------------------------
-
-struct mount_entry {
-    const char* name;
-    struct filesystem* fs;
-};
-
-static struct mount_entry mount_table[8];
-static size_t mount_count;
-
-int attach_filesystem(const char* mpname, struct filesystem* fs) {
-    size_t i;
-
-    if (mpname == NULL || fs == NULL) return -EINVAL;
-
-    for (i = 0; i < mount_count; i++) {
-        if (strcmp(mount_table[i].name, mpname) == 0) return -EEXIST;
-    }
-    if (mount_count >= sizeof(mount_table) / sizeof(mount_table[0])) return -EMFILE;
-
-    mount_table[mount_count].name = mpname;
-    mount_table[mount_count].fs = fs;
-    mount_count++;
-    return 0;
-}
-
-int open_file(const char* mpname, const char* flname, struct uio** uioptr) {
-    size_t i;
-
-    if (mpname == NULL || flname == NULL || uioptr == NULL) return -EINVAL;
-
-    for (i = 0; i < mount_count; i++) {
-        if (strcmp(mount_table[i].name, mpname) == 0) {
-            return mount_table[i].fs->open(mount_table[i].fs, flname, uioptr);
-        }
-    }
-    return -ENOENT;
-}
-
-// ---------------------------------------------------------------------------
-// Stub block device and KTFS image helpers
-// ---------------------------------------------------------------------------
 
 #define STUB_BLKSZ 512U
-#define STUB_TOTAL_BLOCKS 65U
+#define STUB_TOTAL_BLOCKS 64U
 #define STUB_CAPACITY (STUB_BLKSZ * STUB_TOTAL_BLOCKS)
 
 struct stub_device {
@@ -233,16 +103,16 @@ static void stub_populate_filesystem(struct stub_device* dev) {
     super->inode_block_count = 1;
     super->root_directory_inode = 0;
 
-    inode_bitmap[0] = 0x03;
-    block_bitmap[0] = 0x3F;
+    inode_bitmap[0] = 0x03;                // inodes 0 and 1 in use
+    block_bitmap[0] = 0x3F;                // blocks 0-5 in use
     inodes = (struct ktfs_inode*)(dev->data + STUB_BLKSZ * 3);
     memset(inodes, 0, sizeof(struct ktfs_inode) * 16);
 
     inodes[0].size = sizeof(struct ktfs_dir_entry);
-    inodes[0].block[0] = 4;
+    inodes[0].block[0] = 4;  // directory data stored in block 4
 
     inodes[1].size = 4;
-    inodes[1].block[0] = 5;
+    inodes[1].block[0] = 5;  // file data stored in block 5
 
     dirent = (struct ktfs_dir_entry*)(dev->data + STUB_BLKSZ * 4);
     memset(dirent, 0, sizeof(*dirent));
@@ -275,9 +145,9 @@ static void stub_populate_complex_filesystem(struct stub_device* dev) {
     super->inode_block_count = 1;
     super->root_directory_inode = 0;
 
-    inode_bitmap[0] = 0x0F;
-    block_bitmap[0] = 0xFF;
-    block_bitmap[1] = 0x7F;
+    inode_bitmap[0] = 0x0F;  // inodes 0-3 in use
+    block_bitmap[0] = 0xFF;  // blocks 0-7 in use
+    block_bitmap[1] = 0x7F;  // blocks 8-14 in use
 
     inodes = (struct ktfs_inode*)(dev->data + STUB_BLKSZ * 3);
     memset(inodes, 0, sizeof(struct ktfs_inode) * 16);
@@ -340,15 +210,46 @@ static void stub_populate_complex_filesystem(struct stub_device* dev) {
     memcpy(blk, "DOUBLE-INDIRECT!", 16);
 }
 
-// ---------------------------------------------------------------------------
-// Test harness
-// ---------------------------------------------------------------------------
+static int run_single_test(const char* name, int (*fn)(void)) {
+    int ret = fn();
+    kprintf("[%-28s] %s\n", name, (ret == 0) ? "PASS" : "FAIL");
+    return ret;
+}
 
-static int failures;
+static int test_cache_create_invalid(void);
+static int test_cache_basic_fetch(void);
+static int test_cache_hit_reuses_block(void);
+static int test_cache_dirty_flush(void);
+static int test_cache_flush_busy_reference(void);
+static int test_cache_misaligned_access(void);
+static int test_cache_eviction_lru(void);
+static int test_ktfs_open_and_read(void);
+static int test_ktfs_open_invalid(void);
+static int test_ktfs_cntl_setpos(void);
+static int test_ktfs_read_indirect(void);
+static int test_ktfs_read_double_indirect(void);
 
-static void report_result(const char* name, int result) {
-    printf("[%-28s] %s\n", name, (result == 0) ? "PASS" : "FAIL");
-    if (result != 0) failures++;
+void run_testsuite_1() {
+    int failures = 0;
+
+    failures += (run_single_test("cache_create_invalid", &test_cache_create_invalid) != 0);
+    failures += (run_single_test("cache_basic_fetch", &test_cache_basic_fetch) != 0);
+    failures += (run_single_test("cache_hit_reuses_block", &test_cache_hit_reuses_block) != 0);
+    failures += (run_single_test("cache_dirty_flush", &test_cache_dirty_flush) != 0);
+    failures +=
+        (run_single_test("cache_flush_busy_reference", &test_cache_flush_busy_reference) != 0);
+    failures += (run_single_test("cache_misaligned_access", &test_cache_misaligned_access) != 0);
+    failures += (run_single_test("cache_eviction_lru", &test_cache_eviction_lru) != 0);
+    failures += (run_single_test("ktfs_open_and_read", &test_ktfs_open_and_read) != 0);
+    failures += (run_single_test("ktfs_open_invalid", &test_ktfs_open_invalid) != 0);
+    failures += (run_single_test("ktfs_cntl_setpos", &test_ktfs_cntl_setpos) != 0);
+    failures += (run_single_test("ktfs_read_indirect", &test_ktfs_read_indirect) != 0);
+    failures += (run_single_test("ktfs_read_double_indirect", &test_ktfs_read_double_indirect) != 0);
+
+    if (failures == 0)
+        kprintf("All kernel unit tests passed.\n");
+    else
+        kprintf("%d kernel unit test(s) failed.\n", failures);
 }
 
 static struct stub_device global_stub;
@@ -361,21 +262,32 @@ static int test_cache_create_invalid(void) {
     stub_device_init(dev);
 
     result = create_cache(NULL, &cache);
-    if (result != -EINVAL) return -EINVAL;
+    if (result != -EINVAL) {
+        kprintf("expected create_cache(NULL, ...) to fail with -EINVAL, got %s\n", error_name(result));
+        return -EINVAL;
+    }
 
     result = create_cache(&dev->storage, NULL);
-    if (result != -EINVAL) return -EINVAL;
+    if (result != -EINVAL) {
+        kprintf("expected create_cache(..., NULL) to fail with -EINVAL, got %s\n", error_name(result));
+        return -EINVAL;
+    }
 
     result = create_cache(&dev->storage, &cache);
-    return result;
+    if (result != 0) {
+        kprintf("create_cache returned %s\n", error_name(result));
+        return result;
+    }
+
+    return 0;
 }
 
 static int test_cache_basic_fetch(void) {
     struct stub_device* dev = &global_stub;
     struct cache* cache = NULL;
     void* blk = NULL;
-    unsigned long i;
     int result;
+    unsigned long i;
 
     stub_device_init(dev);
     for (i = 0; i < STUB_CAPACITY; i++) dev->data[i] = (unsigned char)(i & 0xFF);
@@ -385,12 +297,21 @@ static int test_cache_basic_fetch(void) {
 
     result = cache_get_block(cache, 0, &blk);
     if (result != 0) {
-        printf("cache_get_block(0) returned %d\n", result);
+        kprintf("cache_get_block failed: %s\n", error_name(result));
         return result;
     }
-    if (blk == NULL) return -EINVAL;
-    if (memcmp(blk, dev->data, STUB_BLKSZ) != 0) return -EINVAL;
-    if (dev->fetch_calls != 1) return -EINVAL;
+    if (blk == NULL) {
+        kprintf("cache_get_block returned NULL block pointer\n");
+        return -EINVAL;
+    }
+    if (memcmp(blk, dev->data, STUB_BLKSZ) != 0) {
+        kprintf("cache_get_block data mismatch\n");
+        return -EINVAL;
+    }
+    if (dev->fetch_calls != 1) {
+        kprintf("expected one fetch call, observed %u\n", dev->fetch_calls);
+        return -EINVAL;
+    }
 
     cache_release_block(cache, blk, 0);
     return 0;
@@ -415,8 +336,16 @@ static int test_cache_hit_reuses_block(void) {
 
     result = cache_get_block(cache, 0, &second);
     if (result != 0) return result;
-    if (first != second) return -EINVAL;
-    if (dev->fetch_calls != 1) return -EINVAL;
+    if (first != second) {
+        kprintf("cache reused a different buffer instance\n");
+        cache_release_block(cache, second, 0);
+        return -EINVAL;
+    }
+    if (dev->fetch_calls != 1) {
+        kprintf("expected a cache hit without extra fetches, observed %u\n", dev->fetch_calls);
+        cache_release_block(cache, second, 0);
+        return -EINVAL;
+    }
 
     cache_release_block(cache, second, 0);
     return 0;
@@ -445,9 +374,19 @@ static int test_cache_dirty_flush(void) {
     cache_release_block(cache, blk, 1);
 
     result = cache_flush(cache);
-    if (result != 0) return result;
-    if (dev->store_calls != 1) return -EINVAL;
-    if (dev->data[0] != 0xAA || dev->data[1] != 0x55) return -EINVAL;
+    if (result != 0) {
+        kprintf("cache_flush failed: %s\n", error_name(result));
+        return result;
+    }
+
+    if (dev->store_calls != 1) {
+        kprintf("expected one store call after flush, observed %u\n", dev->store_calls);
+        return -EINVAL;
+    }
+    if (dev->data[0] != 0xAA || dev->data[1] != 0x55) {
+        kprintf("flush did not propagate modified bytes\n");
+        return -EINVAL;
+    }
 
     return 0;
 }
@@ -471,7 +410,12 @@ static int test_cache_flush_busy_reference(void) {
 
     result = cache_get_block(cache, 0, &same);
     if (result != 0) return result;
-    if (blk != same) return -EINVAL;
+    if (blk != same) {
+        kprintf("expected identical pointer on re-fetch\n");
+        cache_release_block(cache, same, 0);
+        cache_release_block(cache, blk, 0);
+        return -EINVAL;
+    }
 
     bytes = blk;
     bytes[0] = 0x11;
@@ -480,15 +424,33 @@ static int test_cache_flush_busy_reference(void) {
     cache_release_block(cache, blk, 1);
 
     result = cache_flush(cache);
-    if (result != -EBUSY) return -EINVAL;
-    if (dev->store_calls != 0) return -EINVAL;
+    if (result != -EBUSY) {
+        kprintf("expected cache_flush to report -EBUSY while block pinned, got %s\n",
+                error_name(result));
+        cache_release_block(cache, same, 0);
+        return -EINVAL;
+    }
+    if (dev->store_calls != 0) {
+        kprintf("flush wrote back data while block still referenced\n");
+        cache_release_block(cache, same, 0);
+        return -EINVAL;
+    }
 
     cache_release_block(cache, same, 0);
 
     result = cache_flush(cache);
-    if (result != 0) return result;
-    if (dev->store_calls != 1) return -EINVAL;
-    if (dev->data[0] != 0x11 || dev->data[1] != 0x22) return -EINVAL;
+    if (result != 0) {
+        kprintf("cache_flush after release failed: %s\n", error_name(result));
+        return result;
+    }
+    if (dev->store_calls != 1) {
+        kprintf("expected one store after successful flush, observed %u\n", dev->store_calls);
+        return -EINVAL;
+    }
+    if (dev->data[0] != 0x11 || dev->data[1] != 0x22) {
+        kprintf("cache_flush did not persist dirty bytes\n");
+        return -EINVAL;
+    }
 
     return 0;
 }
@@ -504,10 +466,16 @@ static int test_cache_misaligned_access(void) {
     if (result != 0) return result;
 
     result = cache_get_block(cache, STUB_BLKSZ / 2, &blk);
-    if (result != -EINVAL) return -EINVAL;
+    if (result != -EINVAL) {
+        kprintf("misaligned cache_get_block should fail with -EINVAL, got %s\n", error_name(result));
+        return -EINVAL;
+    }
 
     result = cache_get_block(cache, 0, NULL);
-    if (result != -EINVAL) return -EINVAL;
+    if (result != -EINVAL) {
+        kprintf("cache_get_block with NULL pptr should fail with -EINVAL, got %s\n", error_name(result));
+        return -EINVAL;
+    }
 
     return 0;
 }
@@ -525,31 +493,29 @@ static int test_cache_eviction_lru(void) {
 
     for (i = 0; i < 64; i++) {
         result = cache_get_block(cache, (unsigned long long)i * STUB_BLKSZ, &blk);
-        if (result != 0) {
-            printf("loop fetch failed at i=%u result=%d fetch_calls=%u\n", i, result, dev->fetch_calls);
-            return result;
-        }
+        if (result != 0) return result;
         cache_release_block(cache, blk, 0);
     }
-    if (dev->fetch_calls != 64) return -EINVAL;
-
-    printf("capacity=%llu\n", storage_capacity(&dev->storage));
-    result = cache_get_block(cache, 64ULL * STUB_BLKSZ, &blk);
-    if (result != 0) {
-        printf("fetch 64 failed result=%d fetch_calls=%u\n", result, dev->fetch_calls);
-        return result;
+    if (dev->fetch_calls != 64) {
+        kprintf("expected 64 fetches, observed %u\n", dev->fetch_calls);
+        return -EINVAL;
     }
+
+    result = cache_get_block(cache, 64ULL * STUB_BLKSZ, &blk);
+    if (result != 0) return result;
     cache_release_block(cache, blk, 0);
-    if (dev->fetch_calls != 65) return -EINVAL;
+
+    if (dev->fetch_calls != 65) {
+        kprintf("fetch count after adding block 64 should be 65, observed %u\n", dev->fetch_calls);
+        return -EINVAL;
+    }
 
     result = cache_get_block(cache, 0, &blk);
-    if (result != 0) {
-        printf("fetch 0 failed result=%d fetch_calls=%u\n", result, dev->fetch_calls);
-        return result;
-    }
+    if (result != 0) return result;
     cache_release_block(cache, blk, 0);
+
     if (dev->fetch_calls != 66) {
-        printf("expected 66 fetches, observed %u\n", dev->fetch_calls);
+        kprintf("expected refetch after eviction, observed %u\n", dev->fetch_calls);
         return -EINVAL;
     }
 
@@ -561,7 +527,7 @@ static int test_ktfs_open_and_read(void) {
     struct cache* cache = NULL;
     struct uio* file = NULL;
     char buffer[5] = {0};
-    unsigned long long value;
+    unsigned long long value = 0;
     int result;
 
     stub_device_init(dev);
@@ -570,19 +536,27 @@ static int test_ktfs_open_and_read(void) {
     result = create_cache(&dev->storage, &cache);
     if (result != 0) return result;
 
-    result = mount_ktfs("standalone", cache);
-    if (result != 0) return result;
+    result = mount_ktfs("testfs", cache);
+    if (result != 0) {
+        kprintf("mount_ktfs failed: %s\n", error_name(result));
+        return result;
+    }
 
-    result = open_file("standalone", "hello", &file);
-    if (result != 0) return result;
+    result = open_file("testfs", "hello", &file);
+    if (result != 0) {
+        kprintf("open_file failed: %s\n", error_name(result));
+        return result;
+    }
 
     result = (int)uio_read(file, buffer, 4);
     if (result != 4) {
+        kprintf("uio_read returned %s\n", error_name(result));
         uio_close(file);
         return (result < 0) ? result : -EINVAL;
     }
     buffer[4] = '\0';
     if (strcmp(buffer, "TEST") != 0) {
+        kprintf("expected \"TEST\", got \"%s\"\n", buffer);
         uio_close(file);
         return -EINVAL;
     }
@@ -590,6 +564,7 @@ static int test_ktfs_open_and_read(void) {
     value = 0;
     result = uio_cntl(file, FCNTL_GETPOS, &value);
     if (result != 0 || value != 4ULL) {
+        kprintf("FCNTL_GETPOS failed\n");
         uio_close(file);
         return -EINVAL;
     }
@@ -597,6 +572,7 @@ static int test_ktfs_open_and_read(void) {
     value = 0;
     result = uio_cntl(file, FCNTL_GETEND, &value);
     if (result != 0 || value != 4ULL) {
+        kprintf("FCNTL_GETEND failed\n");
         uio_close(file);
         return -EINVAL;
     }
@@ -617,20 +593,32 @@ static int test_ktfs_open_invalid(void) {
     result = create_cache(&dev->storage, &cache);
     if (result != 0) return result;
 
-    result = mount_ktfs("badfs", cache);
+    result = mount_ktfs("fs_invalid", cache);
     if (result != 0) return result;
 
-    result = open_file("badfs", "", &file);
-    if (result != -ENOTSUP) return -EINVAL;
+    result = open_file("fs_invalid", "", &file);
+    if (result != -ENOTSUP) {
+        kprintf("expected empty filename to be rejected, got %s\n", error_name(result));
+        return -EINVAL;
+    }
 
-    result = open_file("badfs", "\\", &file);
-    if (result != -ENOTSUP) return -EINVAL;
+    result = open_file("fs_invalid", "\\", &file);
+    if (result != -ENOTSUP) {
+        kprintf("expected root listing to be unsupported, got %s\n", error_name(result));
+        return -EINVAL;
+    }
 
-    result = open_file("badfs", "missing", &file);
-    if (result != -ENOENT) return -EINVAL;
+    result = open_file("fs_invalid", "missing", &file);
+    if (result != -ENOENT) {
+        kprintf("expected open of missing file to fail with -ENOENT, got %s\n", error_name(result));
+        return -EINVAL;
+    }
 
-    result = open_file("badfs", "hello", &file);
-    if (result != 0) return result;
+    result = open_file("fs_invalid", "hello", &file);
+    if (result != 0) {
+        kprintf("open_file on valid file failed: %s\n", error_name(result));
+        return result;
+    }
 
     uio_close(file);
     return 0;
@@ -649,15 +637,19 @@ static int test_ktfs_cntl_setpos(void) {
     result = create_cache(&dev->storage, &cache);
     if (result != 0) return result;
 
-    result = mount_ktfs("cntlfs", cache);
+    result = mount_ktfs("fs_cntl", cache);
     if (result != 0) return result;
 
-    result = open_file("cntlfs", "hello", &file);
-    if (result != 0) return result;
+    result = open_file("fs_cntl", "hello", &file);
+    if (result != 0) {
+        kprintf("open_file failed: %s\n", error_name(result));
+        return result;
+    }
 
     pos = 2;
     result = uio_cntl(file, FCNTL_SETPOS, &pos);
     if (result != 0) {
+        kprintf("FCNTL_SETPOS with in-range value failed: %s\n", error_name(result));
         uio_close(file);
         return result;
     }
@@ -665,6 +657,7 @@ static int test_ktfs_cntl_setpos(void) {
     pos = 5;
     result = uio_cntl(file, FCNTL_SETPOS, &pos);
     if (result != -EINVAL) {
+        kprintf("FCNTL_SETPOS should reject positions past EOF, got %s\n", error_name(result));
         uio_close(file);
         return -EINVAL;
     }
@@ -688,32 +681,39 @@ static int test_ktfs_read_indirect(void) {
     result = create_cache(&dev->storage, &cache);
     if (result != 0) return result;
 
-    result = mount_ktfs("indirfs", cache);
+    result = mount_ktfs("fs_indirect", cache);
     if (result != 0) return result;
 
-    result = open_file("indirfs", "indirect", &file);
-    if (result != 0) return result;
+    result = open_file("fs_indirect", "indirect", &file);
+    if (result != 0) {
+        kprintf("open_file on indirect file failed: %s\n", error_name(result));
+        return result;
+    }
 
     pos = KTFS_BLKSZ * 4ULL - 8ULL;
     result = uio_cntl(file, FCNTL_SETPOS, &pos);
     if (result != 0) {
+        kprintf("FCNTL_SETPOS near block boundary failed: %s\n", error_name(result));
         uio_close(file);
         return result;
     }
 
     result = (int)uio_read(file, buffer, sizeof(buffer));
     if (result != (int)sizeof(buffer)) {
+        kprintf("uio_read across block boundary failed: %s\n", error_name(result));
         uio_close(file);
         return (result < 0) ? result : -EINVAL;
     }
     for (i = 0; i < 8; i++) {
         if (buffer[i] != 'D') {
+            kprintf("expected 'D' in direct block tail, saw 0x%02x\n", (unsigned char)buffer[i]);
             uio_close(file);
             return -EINVAL;
         }
     }
     for (i = 8; i < 16; i++) {
         if (buffer[i] != 'E') {
+            kprintf("expected 'E' in indirect block head, saw 0x%02x\n", (unsigned char)buffer[i]);
             uio_close(file);
             return -EINVAL;
         }
@@ -737,55 +737,35 @@ static int test_ktfs_read_double_indirect(void) {
     result = create_cache(&dev->storage, &cache);
     if (result != 0) return result;
 
-    result = mount_ktfs("dindir", cache);
+    result = mount_ktfs("fs_dindir", cache);
     if (result != 0) return result;
 
-    result = open_file("dindir", "dindir", &file);
-    if (result != 0) return result;
+    result = open_file("fs_dindir", "dindir", &file);
+    if (result != 0) {
+        kprintf("open_file on double-indirect file failed: %s\n", error_name(result));
+        return result;
+    }
 
     pos = (KTFS_NUM_DIRECT_DATA_BLOCKS + (KTFS_BLKSZ / sizeof(uint32_t))) * (unsigned long long)KTFS_BLKSZ;
     result = uio_cntl(file, FCNTL_SETPOS, &pos);
     if (result != 0) {
+        kprintf("FCNTL_SETPOS to double-indirect region failed: %s\n", error_name(result));
         uio_close(file);
         return result;
     }
 
     result = (int)uio_read(file, buffer, sizeof(buffer));
     if (result != (int)sizeof(buffer)) {
+        kprintf("uio_read from double-indirect region failed: %s\n", error_name(result));
         uio_close(file);
         return (result < 0) ? result : -EINVAL;
     }
     if (memcmp(buffer, "DOUBLE-INDIRECT!", sizeof(buffer)) != 0) {
+        kprintf("double-indirect data mismatch\n");
         uio_close(file);
         return -EINVAL;
     }
 
     uio_close(file);
     return 0;
-}
-
-int main(void) {
-    failures = 0;
-
-    report_result("cache_create_invalid", test_cache_create_invalid());
-    report_result("cache_basic_fetch", test_cache_basic_fetch());
-    report_result("cache_hit_reuses_block", test_cache_hit_reuses_block());
-    report_result("cache_dirty_flush", test_cache_dirty_flush());
-    report_result("cache_flush_busy_reference", test_cache_flush_busy_reference());
-    report_result("cache_misaligned_access", test_cache_misaligned_access());
-    report_result("cache_eviction_lru", test_cache_eviction_lru());
-    report_result("ktfs_open_and_read", test_ktfs_open_and_read());
-    report_result("ktfs_open_invalid", test_ktfs_open_invalid());
-    report_result("ktfs_cntl_setpos", test_ktfs_cntl_setpos());
-    report_result("ktfs_read_indirect", test_ktfs_read_indirect());
-
-    // Note: This test will expose current double-indirect limitations in ktfs.c.
-    report_result("ktfs_read_double_indirect", test_ktfs_read_double_indirect());
-
-    if (failures == 0)
-        printf("All standalone tests passed.\n");
-    else
-        printf("%d standalone test(s) failed.\n", failures);
-
-    return (failures == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 }

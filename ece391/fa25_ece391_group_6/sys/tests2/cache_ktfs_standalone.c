@@ -142,7 +142,7 @@ int open_file(const char* mpname, const char* flname, struct uio** uioptr) {
 // ---------------------------------------------------------------------------
 
 #define STUB_BLKSZ 512U
-#define STUB_TOTAL_BLOCKS 65U
+#define STUB_TOTAL_BLOCKS 64U
 #define STUB_CAPACITY (STUB_BLKSZ * STUB_TOTAL_BLOCKS)
 
 struct stub_device {
@@ -384,10 +384,7 @@ static int test_cache_basic_fetch(void) {
     if (result != 0) return result;
 
     result = cache_get_block(cache, 0, &blk);
-    if (result != 0) {
-        printf("cache_get_block(0) returned %d\n", result);
-        return result;
-    }
+    if (result != 0) return result;
     if (blk == NULL) return -EINVAL;
     if (memcmp(blk, dev->data, STUB_BLKSZ) != 0) return -EINVAL;
     if (dev->fetch_calls != 1) return -EINVAL;
@@ -525,33 +522,20 @@ static int test_cache_eviction_lru(void) {
 
     for (i = 0; i < 64; i++) {
         result = cache_get_block(cache, (unsigned long long)i * STUB_BLKSZ, &blk);
-        if (result != 0) {
-            printf("loop fetch failed at i=%u result=%d fetch_calls=%u\n", i, result, dev->fetch_calls);
-            return result;
-        }
+        if (result != 0) return result;
         cache_release_block(cache, blk, 0);
     }
     if (dev->fetch_calls != 64) return -EINVAL;
 
-    printf("capacity=%llu\n", storage_capacity(&dev->storage));
     result = cache_get_block(cache, 64ULL * STUB_BLKSZ, &blk);
-    if (result != 0) {
-        printf("fetch 64 failed result=%d fetch_calls=%u\n", result, dev->fetch_calls);
-        return result;
-    }
+    if (result != 0) return result;
     cache_release_block(cache, blk, 0);
     if (dev->fetch_calls != 65) return -EINVAL;
 
     result = cache_get_block(cache, 0, &blk);
-    if (result != 0) {
-        printf("fetch 0 failed result=%d fetch_calls=%u\n", result, dev->fetch_calls);
-        return result;
-    }
+    if (result != 0) return result;
     cache_release_block(cache, blk, 0);
-    if (dev->fetch_calls != 66) {
-        printf("expected 66 fetches, observed %u\n", dev->fetch_calls);
-        return -EINVAL;
-    }
+    if (dev->fetch_calls != 66) return -EINVAL;
 
     return 0;
 }

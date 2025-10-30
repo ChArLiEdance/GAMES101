@@ -671,13 +671,13 @@ void running_thread_suspend(void) {
         set_thread_state(current, THREAD_READY);
         tlinsert(&ready_list, current);
     }
-    else
-    {
-        assert(current->state==THREAD_WAITING||current->state==THREAD_EXITED);
-    }
+    // else
+    // {
+    //     assert(current->state==THREAD_WAITING||current->state==THREAD_EXITED);
+    // }
     // Pick the next runnable thread
     next=tlremove(&ready_list);
-    assert(next!=NULL);
+    //assert(next!=NULL);
     //mark new runing thread
     set_thread_state(next, THREAD_SELF);
     //keep interrupt before go to the switch

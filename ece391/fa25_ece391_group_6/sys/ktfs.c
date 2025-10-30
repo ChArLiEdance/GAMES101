@@ -216,7 +216,7 @@ long ktfs_fetch(struct uio* uio, void* buf, unsigned long len) {
     file=(struct ktfs_file*)uio;
     ktfs=file->ktfs;
 
-    if(file->pos>=file->size-file->pos) return 0;
+    if(file->pos>=file->size) return 0;
     //compute available bytes
     remain=file->size-file->pos;
 
@@ -586,35 +586,69 @@ static int ktfs_search_directory(struct ktfs* ktfs, const struct ktfs_inode* dir
  */
 static int ktfs_find(struct ktfs* ktfs, const char* name, struct ktfs_dir_entry* directory_out, struct ktfs_inode* inode_out)
 {
-    struct ktfs_inode root_inode;
+    struct ktfs_inode current_inode;
     struct ktfs_inode file_inode;
     struct ktfs_dir_entry directory;
     const char* temp_name;
+    char component[KTFS_MAX_FILENAME_LEN+1];
+    size_t component_len;
     int result;
+    int find_component=0;
 
     if(name==NULL) return -EINVAL;
 
-    // start from the provided name
     temp_name=name;
-    //skip /
     while(*temp_name=='/')  temp_name++;
-    //if empty name end
     if(*temp_name=='\0') return -EINVAL;
-    //if have second directory end
-    if(strchr(name,'/')!=NULL) return -ENOTSUP;
-
-    //load root directory inode using the inode number in superblock
-    result=ktfs_read_root_directory_inode(ktfs, ktfs->super.root_directory_inode, &root_inode);
+    result=ktfs_read_root_directory_inode(ktfs, ktfs->super.root_directory_inode, &current_inode);
     if(result!=0) return result;
-
-    //scan toor for target name
-    result=ktfs_search_directory(ktfs, &root_inode, temp_name, &directory, &file_inode);
-    if(result!=0) return result;
-    
-    // if find return direcotry and inode
+    while(*temp_name!='\0')
+    {
+        const char* start=temp_name;
+        while(*temp_name!='\0'&&*temp_name!='/') temp_name++;
+        component_len=(size_t)(temp_name-start);
+        if(component_len==0)
+        {
+            while(*temp_name=='/') temp_name++;
+            continue;
+        }
+        if(component_len>KTFS_MAX_FILENAME_LEN) return -EINVAL;
+        memcpy(component, start, component_len);
+        component[component_len]='\0';
+        result=ktfs_search_directory(ktfs, &current_inode, component, &directory, &file_inode);
+        if(result!=0) return result;
+        current_inode=file_inode;
+        find_component=1;
+        while(*temp_name=='/') temp_name++;
+    }
+    if(!find_component)
+    {
+        return -EINVAL;
+    }
     if(directory_out!=NULL) memcpy(directory_out, &directory, sizeof(directory));
-    if(inode_out!=NULL)  memcpy(inode_out, &file_inode, sizeof(file_inode));
+    if(inode_out!=NULL)  memcpy(inode_out, &current_inode, sizeof(current_inode));
     return 0;
+    // // start from the provided name
+    // temp_name=name;
+    // //skip /
+    // while(*temp_name=='/')  temp_name++;
+    // //if empty name end
+    // if(*temp_name=='\0') return -EINVAL;
+    // //if have second directory end
+    // if(strchr(name,'/')!=NULL) return -ENOTSUP;
+
+    // //load root directory inode using the inode number in superblock
+    // result=ktfs_read_root_directory_inode(ktfs, ktfs->super.root_directory_inode, &root_inode);
+    // if(result!=0) return result;
+
+    // //scan toor for target name
+    // result=ktfs_search_directory(ktfs, &root_inode, temp_name, &directory, &file_inode);
+    // if(result!=0) return result;
+    
+    // // if find return direcotry and inode
+    // if(directory_out!=NULL) memcpy(directory_out, &directory, sizeof(directory));
+    // if(inode_out!=NULL)  memcpy(inode_out, &file_inode, sizeof(file_inode));
+    // return 0;
   
 }
 
